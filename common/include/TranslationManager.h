@@ -1,5 +1,7 @@
 #pragma once
 
+#include <string_view>
+
 struct TranslationManagerConfig {
     bool filterChineseSourceWrites = false;
 };
@@ -13,4 +15,5 @@ public:
     static void Clear();
 
     static wchar_t* Translate(const wchar_t* sourceText, bool writeUntranslated);
+    static std::wstring_view Translate(std::wstring_view sourceText, bool writeUntranslated);
 };

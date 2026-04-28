@@ -2,11 +2,13 @@ add_library(common STATIC
     include/AddressResolver.h
     include/Encoding.h
     include/Logger.h
+    include/QStringBridge.h
     include/StringUtils.h
     include/TranslationManager.h
     src/AddressResolver.cpp
     src/Encoding.cpp
     src/Logger.cpp
+    src/QStringBridge.cpp
     src/StringUtils.cpp
     src/TranslationManager.cpp
 )
@@ -17,11 +19,13 @@ source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR} FILES
     include/AddressResolver.h
     include/Encoding.h
     include/Logger.h
+    include/QStringBridge.h
     include/StringUtils.h
     include/TranslationManager.h
     src/AddressResolver.cpp
     src/Encoding.cpp
     src/Logger.cpp
+    src/QStringBridge.cpp
     src/StringUtils.cpp
     src/TranslationManager.cpp
 )

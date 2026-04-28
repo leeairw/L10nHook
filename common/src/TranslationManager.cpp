@@ -500,12 +500,21 @@ wchar_t* TranslationManager::Translate(const wchar_t* sourceText, bool writeUntr
         return nullptr;
     }
 
+    const std::wstring_view translated = Translate(std::wstring_view(sourceText), writeUntranslated);
+    return translated.empty() ? nullptr : g_translationBuffer.data();
+}
+
+std::wstring_view TranslationManager::Translate(std::wstring_view sourceText, bool writeUntranslated) {
+    if (sourceText.empty()) {
+        return {};
+    }
+
     const std::wstring source(sourceText);
     std::lock_guard<std::mutex> lock(g_dictionaryMutex);
     const auto it = g_dictionary.find(source);
     if (it != g_dictionary.end() && HasTranslatedText(source, it->second)) {
         g_translationBuffer = it->second;
-        return g_translationBuffer.data();
+        return g_translationBuffer;
     }
 
     std::vector<std::wstring> captures;
@@ -514,7 +523,7 @@ wchar_t* TranslationManager::Translate(const wchar_t* sourceText, bool writeUntr
             g_translationBuffer = wildcardEntry.translatedHasWildcard
                 ? ApplyWildcardCaptures(wildcardEntry.translated, captures)
                 : wildcardEntry.translated;
-            return g_translationBuffer.data();
+            return g_translationBuffer;
         }
     }
 
@@ -524,5 +533,5 @@ wchar_t* TranslationManager::Translate(const wchar_t* sourceText, bool writeUntr
         }
     }
 
-    return nullptr;
+    return {};
 }

@@ -5,95 +5,49 @@
 
 #include "AddressResolver.h"
 #include "Logger.h"
+#include "QStringBridge.h"
 #include "TranslationManager.h"
 
-#include <cstddef>
 #include <cwchar>
-#include <cstring>
 #include <string>
+#include <string_view>
 
 using QPainterDrawText3_t = void (*)(void* pThis, void* pointF, const void* text, int textFlags, int justificationPadding);
 using QPainterDrawText4_t = void (*)(void* pThis, void* rect, int flags, const void* text, void* boundingRect);
 using QPainterDrawText5_t = void (*)(void* pThis, void* rectangle, const void* text, void* option);
 using QPainterDrawText6_t = void (*)(void* pThis, void* rectangle, int flags, const void* text, void* boundingRect);
-
 QPainterDrawText3_t OriginalDrawText3 = nullptr;
 QPainterDrawText4_t OriginalDrawText4 = nullptr;
 QPainterDrawText5_t OriginalDrawText5 = nullptr;
 QPainterDrawText6_t OriginalDrawText6 = nullptr;
-
 void HookedDrawText3(void* pThis, void* pointF, const void* text, int textFlags, int justificationPadding);
 void HookedDrawText4(void* pThis, void* rect, int flags, const void* text, void* boundingRect);
 void HookedDrawText5(void* pThis, void* rectangle, const void* text, void* option);
 void HookedDrawText6(void* pThis, void* rectangle, int flags, const void* text, void* boundingRect);
 
-
 using QLabelSetText_t = void (*)(void* pThis, const void* text);
-using QWindowSetTitle_t = void (*)(void* pThis, const void* text);
-using QFileDialogGetOpenFileName_t = void* (*)(void* outQString, void* parent, const void* caption, const void* dir, const void* filter, void* selectedFilter, unsigned int options);
-using QFileDialogGetExistingDirectory_t = void* (*)(void* outQString, void* parent, const void* caption, const void* dir, unsigned int options);
-
 QLabelSetText_t OriginalQLabelSetText = nullptr;
-QWindowSetTitle_t OriginalQWindowSetTitle = nullptr;
-QFileDialogGetOpenFileName_t OriginalQFileDialogGetOpenFileName = nullptr;
-QFileDialogGetExistingDirectory_t OriginalQFileDialogGetExistingDirectory = nullptr;
-
 void HookedQLabelSetText(void* pThis, const void* text);
-void HookedQWindowSetTitle(void* pThis, const void* text);
-void* HookedQFileDialogGetOpenFileName(void* outQString, void* parent, const void* caption, const void* dir, const void* filter, void* selectedFilter, unsigned int options);
-void* HookedQFileDialogGetExistingDirectory(void* outQString, void* parent, const void* caption, const void* dir, unsigned int options);
 
+using QWindowSetTitle_t = void (*)(void* pThis, const void* text);
+QWindowSetTitle_t OriginalQWindowSetTitle = nullptr;
+void HookedQWindowSetTitle(void* pThis, const void* text);
+
+using QFileDialogGetOpenFileName_t = void* (*)(void* outQString, void* parent, const void* caption, const void* dir, const void* filter, void* selectedFilter, unsigned int options);
+QFileDialogGetOpenFileName_t OriginalQFileDialogGetOpenFileName = nullptr;
+void* HookedQFileDialogGetOpenFileName(void* outQString, void* parent, const void* caption, const void* dir, const void* filter, void* selectedFilter, unsigned int options);
+
+using QFileDialogGetExistingDirectory_t = void* (*)(void* outQString, void* parent, const void* caption, const void* dir, unsigned int options);
+QFileDialogGetExistingDirectory_t OriginalQFileDialogGetExistingDirectory = nullptr;
+void* HookedQFileDialogGetExistingDirectory(void* outQString, void* parent, const void* caption, const void* dir, unsigned int options);
 
 using QFontMetricsSize_t = void* (*)(void* pThis, void* result, int flags, void* text, int tabStops, int* tabArray);
 QFontMetricsSize_t OriginalQFontMetricsSize = nullptr;
 void* HookedFontMetricsSize(void* pThis, void* result, int flags, void* text, int tabStops, int* tabArray);
 
-using QStringUtf16_t = const wchar_t* (*)(void* pThis);
-using QStringSize_t = long long (*)(void* pThis);
-using QStringCtor_t = void* (*)(void* pThis, const wchar_t* text, long long length);
-using QStringDtor_t = void (*)(void* pThis);
-QStringUtf16_t QStringUtf16 = nullptr;
-QStringSize_t QStringSize = nullptr;
-QStringCtor_t QStringCtor = nullptr;
-QStringDtor_t QStringDtor = nullptr;
+static QStringBridge qstringBridge_; // QString 桥接对象
 
-bool TranslationReady = false;
-constexpr size_t kQStringObjectSize = 24;
-
-const wchar_t* ExtractQStringText(void* qString, long long& length);
-class QStringMemory;
-bool CreateQStringObject(const wchar_t* text, long long length, QStringMemory& qString);
-bool CreateTranslatedQStringObject(const void* text, bool writeUntranslated, QStringMemory& qString);
-
-class QStringMemory {
-public:
-    QStringMemory() = default;
-    QStringMemory(const QStringMemory&) = delete;
-    QStringMemory& operator=(const QStringMemory&) = delete;
-
-    ~QStringMemory() {
-        Destroy();
-    }
-
-    void* Data() {
-        return memory_;
-    }
-
-    void MarkConstructed() {
-        constructed_ = true;
-    }
-
-    void Destroy() {
-        if (constructed_ && QStringDtor != nullptr) {
-            QStringDtor(memory_);
-        }
-        constructed_ = false;
-    }
-
-private:
-    alignas(std::max_align_t) unsigned char memory_[kQStringObjectSize] = {};
-    bool constructed_ = false;
-};
+static QStringBridge::ScopedQString QStringTranslation(const void* text, bool writeUntranslated = true);
 
 bool Hook::Initialize() {
 
@@ -106,23 +60,10 @@ bool Hook::Initialize() {
     OriginalQFileDialogGetOpenFileName = reinterpret_cast<QFileDialogGetOpenFileName_t>(AddressResolver::GetFunctionAddress(L"Qt6Widgets.dll", "?getOpenFileName@QFileDialog@QT@@SA?AVQString@2@PEAVQWidget@2@AEBV32@11PEAV32@V?$QFlags@W4Option@QFileDialog@QT@@@2@@Z"));
     OriginalQFileDialogGetExistingDirectory = reinterpret_cast<QFileDialogGetExistingDirectory_t>(AddressResolver::GetFunctionAddress(L"Qt6Widgets.dll", "?getExistingDirectory@QFileDialog@QT@@SA?AVQString@2@PEAVQWidget@2@AEBV32@1V?$QFlags@W4Option@QFileDialog@QT@@@2@@Z"));
     OriginalQFontMetricsSize = reinterpret_cast<QFontMetricsSize_t>(AddressResolver::GetFunctionAddress(L"Qt6Gui.dll", "?size@QFontMetrics@QT@@QEBA?AVQSize@2@HAEBVQString@2@HPEAH@Z"));
-    QStringUtf16 = reinterpret_cast<QStringUtf16_t>(AddressResolver::GetFunctionAddress(L"Qt6Core.dll", "?utf16@QString@QT@@QEBAPEBGXZ"));
-    QStringSize = reinterpret_cast<QStringSize_t>(AddressResolver::GetFunctionAddress(L"Qt6Core.dll", "?size@QString@QT@@QEBA_JXZ"));
-    QStringCtor = reinterpret_cast<QStringCtor_t>(AddressResolver::GetFunctionAddress(L"Qt6Core.dll", "??0QString@QT@@QEAA@PEBVQChar@1@_J@Z"));
-    QStringDtor = reinterpret_cast<QStringDtor_t>(AddressResolver::GetFunctionAddress(L"Qt6Core.dll", "??1QString@QT@@QEAA@XZ"));
     
     //std::string PatternDrawText3 = "48 89 5C 24 ?? 48 89 6C 24 ?? 48 89 74 24 ?? 48 89 7C 24 ?? 41 56 48 81 EC ?? ?? ?? ?? 48 8B 19 49 8B F9 41 8B E8 48 8B F2 4C 8B F1 48 83 BB ?? ?? ?? ?? ?? 0F 84 ?? ?? ?? ?? 49 83 79 ?? ?? 0F 84 ?? ?? ?? ?? 48 8B 4B ?? 48 83 C1 ?? E8 ?? ?? ?? ?? 85 C0 0F 84 ?? ?? ?? ?? 48 83 BB ?? ?? ?? ?? ?? 75 ?? 48 8B 53 ?? 48 8B CB E8 ?? ?? ?? ?? 0F 57 C0 48 8D 4C 24 ?? 0F 57 C9 48 8B D6 0F 11 44 24 ?? 0F 11 8C 24 ?? ?? ?? ?? FF 15 ?? ?? ?? ?? 48 8B 4B ?? 48 8D 44 24 ?? 48 8B B4 24 ?? ?? ?? ?? 33 D2 4C 89 74 24 ?? 48 85 F6 89 54 24 ?? 44 8B C5 48 0F 44 C2 48 89 54 24 ?? 89 54 24 ?? 48 83 C1 ?? 48 89 44 24 ?? 48 8D 54 24 ?? 45 33 C9 48 89 7C 24 ?? E8 ?? ?? ?? ?? 48 85 F6 74 ?? 48 8D 54 24 ?? 48 8D 4C 24 ?? FF 15 ?? ?? ?? ?? 0F 10 00 0F 11 06 4C 8D 9C 24 ?? ?? ?? ?? 49 8B 5B ?? 49 8B 6B ?? 49 8B 73 ?? 49 8B 7B ?? 49 8B E3 41 5E C3";
     //void* address = AddressResolver::FindPattern(L"Qt6Gui.dll", PatternDrawText3.c_str());
     //Logger::Write(u8"模式解析地址：%p", address);
-
-    if (QStringUtf16 == nullptr || QStringSize == nullptr) {
-        Logger::Write(u8"[Hook] 解析 QString 文本提取函数失败。utf16=%p size=%p", reinterpret_cast<void*>(QStringUtf16), reinterpret_cast<void*>(QStringSize));
-        return false;
-    }
-    if (QStringCtor == nullptr || QStringDtor == nullptr) {
-        Logger::Write(u8"[Hook] 解析 QString 构造/析构函数失败。ctor=%p dtor=%p", reinterpret_cast<void*>(QStringCtor), reinterpret_cast<void*>(QStringDtor));
-        return false;
-    }
 
     if (OriginalDrawText3 == nullptr || OriginalDrawText4 == nullptr ||
         OriginalDrawText5 == nullptr || OriginalDrawText6 == nullptr) {
@@ -147,12 +88,22 @@ bool Hook::Initialize() {
         return false;
     }
 
+    QStringBridge::Config qstringBridgeConfig;
+    qstringBridgeConfig.module_name = L"Qt6Core.dll";
+    if (!qstringBridge_.Initialize(qstringBridgeConfig)) {
+        Logger::Write(u8"[Hook] 初始化 QStringBridge 失败");
+        return false;
+    }
 
     TranslationManagerConfig translationConfig;
     translationConfig.filterChineseSourceWrites = true;
     TranslationManager::Configure(translationConfig);
-    TranslationReady = TranslationManager::Initialize(L"Dictionaries/translations.txt");
-    Logger::Write(L"[Hook] translation dictionary=Dictionaries/translations.txt ready=%d", TranslationReady ? 1 : 0);
+    if (!TranslationManager::Initialize(L"Dictionaries/translations.txt")) {
+        Logger::Write(L"[Hook] 初始化翻译字典失败。dictionary=Dictionaries/translations.txt");
+        qstringBridge_.Reset();
+        return false;
+    }
+    Logger::Write(L"[Hook] 已初始化翻译字典。dictionary=Dictionaries/translations.txt");
 
     DetourRestoreAfterWith();
 
@@ -204,11 +155,7 @@ bool Hook::Initialize() {
         OriginalQFileDialogGetOpenFileName = nullptr;
         OriginalQFileDialogGetExistingDirectory = nullptr;
         OriginalQFontMetricsSize = nullptr;
-        QStringUtf16 = nullptr;
-        QStringSize = nullptr;
-        QStringCtor = nullptr;
-        QStringDtor = nullptr;
-        TranslationReady = false;
+        qstringBridge_.Reset();
         TranslationManager::Clear();
         return false;
     }
@@ -278,74 +225,64 @@ void Hook::Uninitialize() {
     OriginalQFileDialogGetOpenFileName = nullptr;
     OriginalQFileDialogGetExistingDirectory = nullptr;
     OriginalQFontMetricsSize = nullptr;
-    QStringUtf16 = nullptr;
-    QStringSize = nullptr;
-    QStringCtor = nullptr;
-    QStringDtor = nullptr;
-    TranslationReady = false;
+    qstringBridge_.Reset();
     TranslationManager::Clear();
     Logger::Write(L"[Hook] 已卸载 QPainter::drawText hook。");
 }
 
 
 void HookedDrawText3(void* pThis, void* pointF, const void* text, int textFlags, int justificationPadding) {
-    QStringMemory translatedQString;
-    if (CreateTranslatedQStringObject(text, true, translatedQString)) {
-        OriginalDrawText3(pThis, pointF, translatedQString.Data(), textFlags, justificationPadding);
-        return;
+    try {
+        auto translated = QStringTranslation(text);
+        OriginalDrawText3(pThis, pointF, translated ? translated.Get() : text, textFlags, justificationPadding);
+    } catch (...) {
+        OriginalDrawText3(pThis, pointF, text, textFlags, justificationPadding);
     }
-
-    OriginalDrawText3(pThis, pointF, text, textFlags, justificationPadding);
 }
 
 void HookedDrawText4(void* pThis, void* rect, int flags, const void* text, void* boundingRect) {
-    QStringMemory translatedQString;
-    if (CreateTranslatedQStringObject(text, true, translatedQString)) {
-        OriginalDrawText4(pThis, rect, flags, translatedQString.Data(), boundingRect);
-        return;
+    try {
+        auto translated = QStringTranslation(text);
+        OriginalDrawText4(pThis, rect, flags, translated ? translated.Get() : text, boundingRect);
+    } catch (...) {
+        OriginalDrawText4(pThis, rect, flags, text, boundingRect);
     }
-
-    OriginalDrawText4(pThis, rect, flags, text, boundingRect);
 }
 
 void HookedDrawText5(void* pThis, void* rectangle, const void* text, void* option) {
-    QStringMemory translatedQString;
-    if (CreateTranslatedQStringObject(text, true, translatedQString)) {
-        OriginalDrawText5(pThis, rectangle, translatedQString.Data(), option);
-        return;
+    try {
+        auto translated = QStringTranslation(text);
+        OriginalDrawText5(pThis, rectangle, translated ? translated.Get() : text, option);
+    } catch (...) {
+        OriginalDrawText5(pThis, rectangle, text, option);
     }
-
-    OriginalDrawText5(pThis, rectangle, text, option);
 }
 
 void HookedDrawText6(void* pThis, void* rectangle, int flags, const void* text, void* boundingRect) {
-    QStringMemory translatedQString;
-    if (CreateTranslatedQStringObject(text, true, translatedQString)) {
-        OriginalDrawText6(pThis, rectangle, flags, translatedQString.Data(), boundingRect);
-        return;
+    try {
+        auto translated = QStringTranslation(text);
+        OriginalDrawText6(pThis, rectangle, flags, translated ? translated.Get() : text, boundingRect);
+    } catch (...) {
+        OriginalDrawText6(pThis, rectangle, flags, text, boundingRect);
     }
-
-    OriginalDrawText6(pThis, rectangle, flags, text, boundingRect);
 }
 
 void HookedQLabelSetText(void* pThis, const void* text) {
-    QStringMemory translatedQString;
-    if (CreateTranslatedQStringObject(text, true, translatedQString)) {
-        OriginalQLabelSetText(pThis, translatedQString.Data());
-        return;
+    try {
+        auto translated = QStringTranslation(text);
+        OriginalQLabelSetText(pThis, translated ? translated.Get() : text);
+    } catch (...) {
+        OriginalQLabelSetText(pThis, text);
     }
-
-    OriginalQLabelSetText(pThis, text);
 }
 
 void HookedQWindowSetTitle(void* pThis, const void* text) {
-    QStringMemory translatedQString;
-    if (CreateTranslatedQStringObject(text, true, translatedQString)) {
-        OriginalQWindowSetTitle(pThis, translatedQString.Data());
-        return;
+    try {
+        auto translated = QStringTranslation(text);
+        OriginalQWindowSetTitle(pThis, translated ? translated.Get() : text);
+    } catch (...) {
+        OriginalQWindowSetTitle(pThis, text);
     }
-
-    OriginalQWindowSetTitle(pThis, text);
 }
 
 void* HookedQFileDialogGetOpenFileName(void* outQString,
@@ -355,22 +292,21 @@ void* HookedQFileDialogGetOpenFileName(void* outQString,
                                        const void* filter,
                                        void* selectedFilter,
                                        unsigned int options) {
-    QStringMemory translatedCaption;
-    QStringMemory translatedFilter;
-    const bool hasTranslatedCaption = CreateTranslatedQStringObject(caption, true, translatedCaption);
-    const bool hasTranslatedFilter = CreateTranslatedQStringObject(filter, true, translatedFilter);
-
-    void* result = OriginalQFileDialogGetOpenFileName(
-        outQString,
-        parent,
-        hasTranslatedCaption ? translatedCaption.Data() : caption,
-        dir,
-        hasTranslatedFilter ? translatedFilter.Data() : filter,
-        selectedFilter,
-        options
-    );
-
-    return result;
+    try {
+        auto translatedCaption = QStringTranslation(caption);
+        auto translatedFilter = QStringTranslation(filter);
+        return OriginalQFileDialogGetOpenFileName(
+            outQString,
+            parent,
+            translatedCaption ? translatedCaption.Get() : caption,
+            dir,
+            translatedFilter ? translatedFilter.Get() : filter,
+            selectedFilter,
+            options
+        );
+    } catch (...) {
+        return OriginalQFileDialogGetOpenFileName(outQString, parent, caption, dir, filter, selectedFilter, options);
+    }
 }
 
 void* HookedQFileDialogGetExistingDirectory(void* outQString,
@@ -378,90 +314,54 @@ void* HookedQFileDialogGetExistingDirectory(void* outQString,
                                             const void* caption,
                                             const void* dir,
                                             unsigned int options) {
-    QStringMemory translatedCaption;
-    const bool hasTranslatedCaption = CreateTranslatedQStringObject(caption, true, translatedCaption);
-    void* result = OriginalQFileDialogGetExistingDirectory(
-        outQString,
-        parent,
-        hasTranslatedCaption ? translatedCaption.Data() : caption,
-        dir,
-        options
-    );
-
-    return result;
+    try {
+        auto translatedCaption = QStringTranslation(caption);
+        return OriginalQFileDialogGetExistingDirectory(
+            outQString,
+            parent,
+            translatedCaption ? translatedCaption.Get() : caption,
+            dir,
+            options
+        );
+    } catch (...) {
+        return OriginalQFileDialogGetExistingDirectory(outQString, parent, caption, dir, options);
+    }
 }
 
 void* HookedFontMetricsSize(void* pThis, void* result, int flags, void* text, int tabStops, int* tabArray) {
-    long long length = 0;
-    const wchar_t* value = ExtractQStringText(text, length);
-    if (value != nullptr && TranslationReady) {
-        std::wstring source(value, static_cast<size_t>(length));
-        wchar_t* translated = source.empty() ? nullptr : TranslationManager::Translate(source.c_str(), false);
-        if (translated != nullptr) {
-            QStringMemory translatedQString;
-            if (CreateQStringObject(
-                translated,
-                static_cast<long long>(std::wcslen(translated)),
-                translatedQString
-            )) {
-                void* sizeResult = OriginalQFontMetricsSize(pThis, result, flags, translatedQString.Data(), tabStops, tabArray);
-                //Logger::Write(L"[Hook] QFontMetrics::size text=%.*s translated=%s",
-                //                    static_cast<int>(length),
-                //                    value,
-                //                    translated);
-                return sizeResult;
-            }
-
-            Logger::Write(L"[Hook] 创建 QFontMetrics::size 翻译 QString 失败，回退原始文本。");
-        }
+    try {
+        auto translated = QStringTranslation(text, false);
+        return OriginalQFontMetricsSize(
+            pThis,
+            result,
+            flags,
+            const_cast<void*>(translated ? translated.Get() : text),
+            tabStops,
+            tabArray
+        );
+    } catch (...) {
+        return OriginalQFontMetricsSize(pThis, result, flags, text, tabStops, tabArray);
     }
-
-    return OriginalQFontMetricsSize(pThis, result, flags, text, tabStops, tabArray);
 }
 
-const wchar_t* ExtractQStringText(void* qString, long long& length) {
-    length = 0;
-    if (qString == nullptr || QStringUtf16 == nullptr || QStringSize == nullptr) {
-        return nullptr;
+static QStringBridge::ScopedQString QStringTranslation(const void* text, bool writeUntranslated) {
+    if (text == nullptr) {
+        return {};
     }
 
-    length = QStringSize(qString);
-    if (length <= 0) {
-        length = 0;
-        return L"";
+    int length = 0;
+    const wchar_t* value = qstringBridge_.Extract(text, length);
+    if (value == nullptr || length <= 0) {
+        return {};
     }
 
-    return QStringUtf16(qString);
-}
-
-bool CreateQStringObject(const wchar_t* text, long long length, QStringMemory& qString) {
-    if (text == nullptr || length < 0 || QStringCtor == nullptr) {
-        return false;
+    const std::wstring_view translated = TranslationManager::Translate(
+        std::wstring_view(value, static_cast<std::size_t>(length)),
+        writeUntranslated
+    );
+    if (translated.empty()) {
+        return {};
     }
 
-    std::memset(qString.Data(), 0, kQStringObjectSize);
-    QStringCtor(qString.Data(), text, length);
-    qString.MarkConstructed();
-    return true;
-}
-
-bool CreateTranslatedQStringObject(const void* text, bool writeUntranslated, QStringMemory& qString) {
-    long long length = 0;
-    const wchar_t* value = ExtractQStringText(const_cast<void*>(text), length);
-    if (value == nullptr || !TranslationReady || length <= 0) {
-        return false;
-    }
-
-    const std::wstring source(value, static_cast<size_t>(length));
-    wchar_t* translated = TranslationManager::Translate(source.c_str(), writeUntranslated);
-    if (translated == nullptr) {
-        return false;
-    }
-
-    //Logger::Write(L"[Hook] QString translate text=%.*s translated=%s length=%lld",
-    //                    static_cast<int>(length),
-    //                    value,
-    //                    translated,
-    //                    length);
-    return CreateQStringObject(translated, static_cast<long long>(std::wcslen(translated)), qString);
+    return qstringBridge_.CreateScoped(translated);
 }
