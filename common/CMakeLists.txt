@@ -1,11 +1,13 @@
 add_library(common STATIC
     include/AddressResolver.h
+    include/DetoursHook.h
     include/Encoding.h
     include/Logger.h
     include/QStringBridge.h
     include/StringUtils.h
     include/TranslationManager.h
     src/AddressResolver.cpp
+    src/DetoursHook.cpp
     src/Encoding.cpp
     src/Logger.cpp
     src/QStringBridge.cpp
@@ -17,12 +19,14 @@ set_target_properties(common PROPERTIES FOLDER "libraries")
 
 source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR} FILES
     include/AddressResolver.h
+    include/DetoursHook.h
     include/Encoding.h
     include/Logger.h
     include/QStringBridge.h
     include/StringUtils.h
     include/TranslationManager.h
     src/AddressResolver.cpp
+    src/DetoursHook.cpp
     src/Encoding.cpp
     src/Logger.cpp
     src/QStringBridge.cpp
@@ -33,6 +37,11 @@ source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR} FILES
 target_include_directories(common
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+target_link_libraries(common
+    PUBLIC
+        detours
 )
 
 target_compile_definitions(common
