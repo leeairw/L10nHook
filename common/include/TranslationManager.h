@@ -15,5 +15,6 @@ public:
     static void Clear();
 
     static wchar_t* Translate(const wchar_t* sourceText, bool writeUntranslated);
+    static char* Translate(const char* sourceText, bool writeUntranslated, unsigned int inputCodePage, unsigned int outputCodePage);
     static std::wstring_view Translate(std::wstring_view sourceText, bool writeUntranslated);
 };

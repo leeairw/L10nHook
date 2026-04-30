@@ -1,5 +1,6 @@
 #include "TranslationManager.h"
 
+#include "Encoding.h"
 #include "StringUtils.h"
 
 #include <Windows.h>
@@ -18,6 +19,7 @@ std::unordered_map<std::wstring, std::wstring> g_dictionary;
 TranslationManagerConfig g_config;
 std::wstring g_dictionaryPath;
 thread_local std::wstring g_translationBuffer;
+thread_local std::string g_multibyteTranslationBuffer;
 
 constexpr wchar_t kWildcardToken[] = L"{*}";
 constexpr size_t kWildcardTokenLength = 3;
@@ -493,6 +495,7 @@ void TranslationManager::Clear() {
     g_wildcardDictionary.clear();
     g_dictionaryPath.clear();
     g_translationBuffer.clear();
+    g_multibyteTranslationBuffer.clear();
 }
 
 wchar_t* TranslationManager::Translate(const wchar_t* sourceText, bool writeUntranslated) {
@@ -502,6 +505,36 @@ wchar_t* TranslationManager::Translate(const wchar_t* sourceText, bool writeUntr
 
     const std::wstring_view translated = Translate(std::wstring_view(sourceText), writeUntranslated);
     return translated.empty() ? nullptr : g_translationBuffer.data();
+}
+
+char* TranslationManager::Translate(
+    const char* sourceText,
+    bool writeUntranslated,
+    unsigned int inputCodePage,
+    unsigned int outputCodePage
+) {
+    if (sourceText == nullptr) {
+        return nullptr;
+    }
+    g_multibyteTranslationBuffer.clear();
+
+    std::wstring source;
+    if (!Encoding::MultiByteToUtf16(inputCodePage, sourceText, source)) {
+        return nullptr;
+    }
+
+    const std::wstring_view translated = Translate(std::wstring_view(source), writeUntranslated);
+    if (translated.empty()) {
+        return nullptr;
+    }
+
+    std::wstring translatedText(translated.data(), translated.size());
+    if (!Encoding::Utf16ToMultiByte(outputCodePage, translatedText.c_str(), g_multibyteTranslationBuffer)) {
+        g_multibyteTranslationBuffer.clear();
+        return nullptr;
+    }
+
+    return g_multibyteTranslationBuffer.data();
 }
 
 std::wstring_view TranslationManager::Translate(std::wstring_view sourceText, bool writeUntranslated) {
