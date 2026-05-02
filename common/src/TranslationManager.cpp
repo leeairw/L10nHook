@@ -5,6 +5,7 @@
 
 #include <Windows.h>
 
+#include <array>
 #include <fstream>
 #include <mutex>
 #include <string>
@@ -18,11 +19,15 @@ std::mutex g_dictionaryMutex;
 std::unordered_map<std::wstring, std::wstring> g_dictionary;
 TranslationManagerConfig g_config;
 std::wstring g_dictionaryPath;
-thread_local std::wstring g_translationBuffer;
-thread_local std::string g_multibyteTranslationBuffer;
 
+constexpr size_t kTranslationBufferSlotCount = 64;
 constexpr wchar_t kWildcardToken[] = L"{*}";
 constexpr size_t kWildcardTokenLength = 3;
+
+thread_local std::array<std::wstring, kTranslationBufferSlotCount> g_translationBuffers;
+thread_local size_t g_translationBufferIndex = 0;
+thread_local std::array<std::string, kTranslationBufferSlotCount> g_multibyteTranslationBuffers;
+thread_local size_t g_multibyteTranslationBufferIndex = 0;
 
 struct WildcardEntry {
     std::wstring source;
@@ -32,6 +37,32 @@ struct WildcardEntry {
 };
 
 std::vector<WildcardEntry> g_wildcardDictionary;
+
+std::wstring& NextTranslationBuffer() {
+    std::wstring& buffer = g_translationBuffers[g_translationBufferIndex];
+    g_translationBufferIndex = (g_translationBufferIndex + 1) % kTranslationBufferSlotCount;
+    buffer.clear();
+    return buffer;
+}
+
+std::string& NextMultibyteTranslationBuffer() {
+    std::string& buffer = g_multibyteTranslationBuffers[g_multibyteTranslationBufferIndex];
+    g_multibyteTranslationBufferIndex = (g_multibyteTranslationBufferIndex + 1) % kTranslationBufferSlotCount;
+    buffer.clear();
+    return buffer;
+}
+
+void ClearTranslationBuffers() {
+    for (std::wstring& buffer : g_translationBuffers) {
+        buffer.clear();
+    }
+    g_translationBufferIndex = 0;
+
+    for (std::string& buffer : g_multibyteTranslationBuffers) {
+        buffer.clear();
+    }
+    g_multibyteTranslationBufferIndex = 0;
+}
 
 bool Utf8ToWide(const std::string& utf8, std::wstring& wide) {
     if (utf8.empty()) {
@@ -485,7 +516,7 @@ bool TranslationManager::Initialize(const wchar_t* dictionaryName) {
         }
     }
     g_dictionaryPath = std::move(dictionaryPath);
-    g_translationBuffer.clear();
+    ClearTranslationBuffers();
     return true;
 }
 
@@ -494,8 +525,7 @@ void TranslationManager::Clear() {
     g_dictionary.clear();
     g_wildcardDictionary.clear();
     g_dictionaryPath.clear();
-    g_translationBuffer.clear();
-    g_multibyteTranslationBuffer.clear();
+    ClearTranslationBuffers();
 }
 
 wchar_t* TranslationManager::Translate(const wchar_t* sourceText, bool writeUntranslated) {
@@ -504,7 +534,7 @@ wchar_t* TranslationManager::Translate(const wchar_t* sourceText, bool writeUntr
     }
 
     const std::wstring_view translated = Translate(std::wstring_view(sourceText), writeUntranslated);
-    return translated.empty() ? nullptr : g_translationBuffer.data();
+    return translated.empty() ? nullptr : const_cast<wchar_t*>(translated.data());
 }
 
 char* TranslationManager::Translate(
@@ -516,7 +546,6 @@ char* TranslationManager::Translate(
     if (sourceText == nullptr) {
         return nullptr;
     }
-    g_multibyteTranslationBuffer.clear();
 
     std::wstring source;
     if (!Encoding::MultiByteToUtf16(inputCodePage, sourceText, source)) {
@@ -529,12 +558,13 @@ char* TranslationManager::Translate(
     }
 
     std::wstring translatedText(translated.data(), translated.size());
-    if (!Encoding::Utf16ToMultiByte(outputCodePage, translatedText.c_str(), g_multibyteTranslationBuffer)) {
-        g_multibyteTranslationBuffer.clear();
+    std::string& buffer = NextMultibyteTranslationBuffer();
+    if (!Encoding::Utf16ToMultiByte(outputCodePage, translatedText.c_str(), buffer)) {
+        buffer.clear();
         return nullptr;
     }
 
-    return g_multibyteTranslationBuffer.data();
+    return buffer.data();
 }
 
 std::wstring_view TranslationManager::Translate(std::wstring_view sourceText, bool writeUntranslated) {
@@ -546,17 +576,19 @@ std::wstring_view TranslationManager::Translate(std::wstring_view sourceText, bo
     std::lock_guard<std::mutex> lock(g_dictionaryMutex);
     const auto it = g_dictionary.find(source);
     if (it != g_dictionary.end() && HasTranslatedText(source, it->second)) {
-        g_translationBuffer = it->second;
-        return g_translationBuffer;
+        std::wstring& buffer = NextTranslationBuffer();
+        buffer = it->second;
+        return buffer;
     }
 
     std::vector<std::wstring> captures;
     for (const auto& wildcardEntry : g_wildcardDictionary) {
         if (MatchWildcardPattern(wildcardEntry.sourceParts, source, captures)) {
-            g_translationBuffer = wildcardEntry.translatedHasWildcard
+            std::wstring& buffer = NextTranslationBuffer();
+            buffer = wildcardEntry.translatedHasWildcard
                 ? ApplyWildcardCaptures(wildcardEntry.translated, captures)
                 : wildcardEntry.translated;
-            return g_translationBuffer;
+            return buffer;
         }
     }
 
