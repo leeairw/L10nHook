@@ -37,13 +37,15 @@ constexpr std::size_t kQt6FieldTextPtr = 0x08;
 constexpr std::size_t kQt6FieldLength = 0x10;
 constexpr std::size_t kQt6QStringObjectSize = 24u;
 
-constexpr std::size_t kQt5DptrFieldLength = 0x08;
-constexpr std::size_t kQt5DptrFieldTextPtr = 0x18;
+constexpr std::size_t kQt5DptrFieldLength = 0x04;
+constexpr std::size_t kQt5DptrFieldTextOffset = 0x10;
 constexpr std::size_t kQt5QStringObjectSize = 8u;
 
 const std::vector<ResolveCandidate> kQStringConstructorCandidates = {
     ExportNameCandidate{ "??0QString@QT@@QEAA@PEBVQChar@1@_J@Z" },
+    ExportNameCandidate{ "??0QString@QT@@QEAA@PEBVQChar@1@H@Z" },
     ExportNameCandidate{ "??0QString@@QEAA@PEBVQChar@@_J@Z" },
+    ExportNameCandidate{ "??0QString@@QEAA@PEBVQChar@@H@Z" },
     PatternCandidate{ "48 89 5C 24 18 48 89 4C 24 08 55 56 57 48 83 EC 20 49 8B D8 48 8B F2 48 8B F9 33 ED 48 89 29 48 89 69 08 48 89 69 10 48 85 D2 75 ?? 48 89 29 48 89 69 08 48 89 69 10 E9 ?? ?? ?? ?? 48 85 DB 79 ?? 48 8B CE E8 ?? ?? ?? ?? 48 8B D8 48 85 C0 75 ?? 48 8B 0F 48 89 2F 48 8D 05 ?? ?? ?? ?? 48 89 47 08 48 89 6F 10 48 85 C9" },
 };
 
@@ -62,7 +64,9 @@ const std::vector<ResolveCandidate> kQStringUtf16Candidates = {
 
 const std::vector<ResolveCandidate> kQStringSizeCandidates = {
     ExportNameCandidate{ "?size@QString@QT@@QEBA_JXZ" },
+    ExportNameCandidate{ "?size@QString@QT@@QEBAHXZ" },
     ExportNameCandidate{ "?size@QString@@QEBA_JXZ" },
+    ExportNameCandidate{ "?size@QString@@QEBAHXZ" },
     PatternCandidate{ "48 8B 41 10 C3" },
 };
 #elif defined(_M_IX86)
@@ -73,7 +77,7 @@ constexpr std::size_t kQt6FieldLength = 0x08;
 constexpr std::size_t kQt6QStringObjectSize = 12u;
 
 constexpr std::size_t kQt5DptrFieldLength = 0x04;
-constexpr std::size_t kQt5DptrFieldTextPtr = 0x10;
+constexpr std::size_t kQt5DptrFieldTextOffset = 0x0C;
 constexpr std::size_t kQt5QStringObjectSize = 4u;
 
 const std::vector<ResolveCandidate> kQStringConstructorCandidates = {
@@ -337,21 +341,22 @@ bool QStringBridge::CanCreate() const {
 }
 
 const wchar_t* QStringBridge::Extract(const void* qstring, int& length) const {
-    length = 0;
-    if (qstring == nullptr) {
-        return nullptr;
-    }
+	length = 0;
+	if (qstring == nullptr) {
+		return nullptr;
+	}
 
-    if (const wchar_t* text = ExtractViaApi(qstring, length)) {
-        return text;
-    }
-    if (const wchar_t* text = ExtractQt6Layout(qstring, length)) {
-        return text;
-    }
-    if (const wchar_t* text = ExtractQt5Layout(qstring, length)) {
-        return text;
-    }
-    return nullptr;
+	if (const wchar_t* text = ExtractViaApi(qstring, length)) {
+		return text;
+	}
+	if (const wchar_t* text = ExtractQt6Layout(qstring, length)) {
+		return text;
+	}
+	if (const wchar_t* text = ExtractQt5Layout(qstring, length)) {
+		return text;
+	}
+
+	return nullptr;
 }
 
 std::wstring QStringBridge::Extract(const void* qstring) const {
@@ -483,13 +488,19 @@ const wchar_t* QStringBridge::ExtractQt5Layout(const void* qstring, int& length)
             return nullptr;
         }
 
-        const wchar_t* wide = reinterpret_cast<const wchar_t*>(dptr + kQt5DptrFieldTextPtr);
+        const auto textOffset = *reinterpret_cast<const std::intptr_t*>(dptr + kQt5DptrFieldTextOffset);
+        if (textOffset <= 0 || textOffset > 0x1000) {
+            return nullptr;
+        }
+
+        const wchar_t* wide = reinterpret_cast<const wchar_t*>(dptr + static_cast<std::uintptr_t>(textOffset));
         if (!IsReadableRange(wide, static_cast<std::size_t>(len) * sizeof(wchar_t))) {
             return nullptr;
         }
 
         length = len;
         return wide;
+
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return nullptr;
     }

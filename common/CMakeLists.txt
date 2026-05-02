@@ -3,6 +3,7 @@ add_library(common STATIC
     include/DetoursHook.h
     include/Encoding.h
     include/Logger.h
+    include/ModuleUtils.h
     include/QStringBridge.h
     include/StringUtils.h
     include/TranslationManager.h
@@ -10,6 +11,7 @@ add_library(common STATIC
     src/DetoursHook.cpp
     src/Encoding.cpp
     src/Logger.cpp
+    src/ModuleUtils.cpp
     src/QStringBridge.cpp
     src/StringUtils.cpp
     src/TranslationManager.cpp
@@ -22,6 +24,7 @@ source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR} FILES
     include/DetoursHook.h
     include/Encoding.h
     include/Logger.h
+    include/ModuleUtils.h
     include/QStringBridge.h
     include/StringUtils.h
     include/TranslationManager.h
@@ -29,6 +32,7 @@ source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR} FILES
     src/DetoursHook.cpp
     src/Encoding.cpp
     src/Logger.cpp
+    src/ModuleUtils.cpp
     src/QStringBridge.cpp
     src/StringUtils.cpp
     src/TranslationManager.cpp
