@@ -2,12 +2,20 @@
 
 #include <Windows.h>
 
+#include <array>
 #include <cstring>
 #include <limits>
+#include <string>
 
 namespace {
 
 constexpr unsigned int GbkCodePage = 936;
+constexpr std::size_t kConversionBufferCount = 64;
+
+thread_local std::array<std::wstring, kConversionBufferCount> g_wideBuffers;
+thread_local std::size_t g_wideBufferIndex = 0;
+thread_local std::array<std::string, kConversionBufferCount> g_multibyteBuffers;
+thread_local std::size_t g_multibyteBufferIndex = 0;
 
 DWORD MultiByteFlags(unsigned int codePage) {
     return codePage == CP_UTF8 ? MB_ERR_INVALID_CHARS : 0;
@@ -17,11 +25,21 @@ DWORD Utf16Flags(unsigned int codePage) {
     return codePage == CP_UTF8 ? WC_ERR_INVALID_CHARS : 0;
 }
 
-} // namespace
+std::wstring& NextWideBuffer() {
+    std::wstring& buffer = g_wideBuffers[g_wideBufferIndex];
+    g_wideBufferIndex = (g_wideBufferIndex + 1) % kConversionBufferCount;
+    buffer.clear();
+    return buffer;
+}
 
-namespace Encoding {
+std::string& NextMultibyteBuffer() {
+    std::string& buffer = g_multibyteBuffers[g_multibyteBufferIndex];
+    g_multibyteBufferIndex = (g_multibyteBufferIndex + 1) % kConversionBufferCount;
+    buffer.clear();
+    return buffer;
+}
 
-bool MultiByteToUtf16(unsigned int codePage, const char* text, std::wstring& output) {
+bool TryMultiByteToUtf16(unsigned int codePage, const char* text, std::wstring& output) {
     output.clear();
     if (text == nullptr) {
         return false;
@@ -61,7 +79,7 @@ bool MultiByteToUtf16(unsigned int codePage, const char* text, std::wstring& out
     return written == size;
 }
 
-bool Utf16ToMultiByte(unsigned int codePage, const wchar_t* text, std::string& output) {
+bool TryUtf16ToMultiByte(unsigned int codePage, const wchar_t* text, std::string& output) {
     output.clear();
     if (text == nullptr) {
         return false;
@@ -108,62 +126,92 @@ bool Utf16ToMultiByte(unsigned int codePage, const wchar_t* text, std::string& o
     return written == size && !usedDefaultChar;
 }
 
-bool GbkToUtf16(const char* text, std::wstring& output) {
-    return MultiByteToUtf16(GbkCodePage, text, output);
+} // namespace
+
+namespace Encoding {
+
+const wchar_t* MultiByteToUtf16(unsigned int codePage, const char* text) {
+    std::wstring& output = NextWideBuffer();
+    return TryMultiByteToUtf16(codePage, text, output) ? output.c_str() : nullptr;
 }
 
-bool GbkToUtf16(const std::string& text, std::wstring& output) {
-    return GbkToUtf16(text.c_str(), output);
+const char* Utf16ToMultiByte(unsigned int codePage, const wchar_t* text) {
+    std::string& output = NextMultibyteBuffer();
+    return TryUtf16ToMultiByte(codePage, text, output) ? output.c_str() : nullptr;
 }
 
-bool Utf16ToGbk(const wchar_t* text, std::string& output) {
-    return Utf16ToMultiByte(GbkCodePage, text, output);
-}
-
-bool Utf16ToGbk(const std::wstring& text, std::string& output) {
-    return Utf16ToGbk(text.c_str(), output);
-}
-
-bool Utf8ToUtf16(const char* text, std::wstring& output) {
-    return MultiByteToUtf16(CP_UTF8, text, output);
-}
-
-bool Utf8ToUtf16(const std::string& text, std::wstring& output) {
-    return Utf8ToUtf16(text.c_str(), output);
-}
-
-bool Utf16ToUtf8(const wchar_t* text, std::string& output) {
-    return Utf16ToMultiByte(CP_UTF8, text, output);
-}
-
-bool Utf16ToUtf8(const std::wstring& text, std::string& output) {
-    return Utf16ToUtf8(text.c_str(), output);
-}
-
-bool GbkToUtf8(const char* text, std::string& output) {
-    std::wstring utf16;
-    if (!GbkToUtf16(text, utf16)) {
-        output.clear();
-        return false;
+std::wstring MultiByteToUtf16(unsigned int codePage, const std::string& text) {
+    const wchar_t* converted = MultiByteToUtf16(codePage, text.c_str());
+    if (converted == nullptr) {
+        return {};
     }
-    return Utf16ToUtf8(utf16, output);
+    return std::wstring(converted);
 }
 
-bool GbkToUtf8(const std::string& text, std::string& output) {
-    return GbkToUtf8(text.c_str(), output);
-}
-
-bool Utf8ToGbk(const char* text, std::string& output) {
-    std::wstring utf16;
-    if (!Utf8ToUtf16(text, utf16)) {
-        output.clear();
-        return false;
+std::string Utf16ToMultiByte(unsigned int codePage, const std::wstring& text) {
+    const char* converted = Utf16ToMultiByte(codePage, text.c_str());
+    if (converted == nullptr) {
+        return {};
     }
-    return Utf16ToGbk(utf16, output);
+    return std::string(converted);
 }
 
-bool Utf8ToGbk(const std::string& text, std::string& output) {
-    return Utf8ToGbk(text.c_str(), output);
+const wchar_t* GbkToUtf16(const char* text) {
+    return MultiByteToUtf16(GbkCodePage, text);
+}
+
+const char* Utf16ToGbk(const wchar_t* text) {
+    return Utf16ToMultiByte(GbkCodePage, text);
+}
+
+const wchar_t* Utf8ToUtf16(const char* text) {
+    return MultiByteToUtf16(CP_UTF8, text);
+}
+
+const char* Utf16ToUtf8(const wchar_t* text) {
+    return Utf16ToMultiByte(CP_UTF8, text);
+}
+
+const char* GbkToUtf8(const char* text) {
+    const wchar_t* utf16 = GbkToUtf16(text);
+    return utf16 != nullptr ? Utf16ToUtf8(utf16) : nullptr;
+}
+
+const char* Utf8ToGbk(const char* text) {
+    const wchar_t* utf16 = Utf8ToUtf16(text);
+    return utf16 != nullptr ? Utf16ToGbk(utf16) : nullptr;
+}
+
+std::wstring GbkToUtf16(const std::string& text) {
+    return MultiByteToUtf16(GbkCodePage, text);
+}
+
+std::string Utf16ToGbk(const std::wstring& text) {
+    return Utf16ToMultiByte(GbkCodePage, text);
+}
+
+std::wstring Utf8ToUtf16(const std::string& text) {
+    return MultiByteToUtf16(CP_UTF8, text);
+}
+
+std::string Utf16ToUtf8(const std::wstring& text) {
+    return Utf16ToMultiByte(CP_UTF8, text);
+}
+
+std::string GbkToUtf8(const std::string& text) {
+    const char* converted = GbkToUtf8(text.c_str());
+    if (converted == nullptr) {
+        return {};
+    }
+    return std::string(converted);
+}
+
+std::string Utf8ToGbk(const std::string& text) {
+    const char* converted = Utf8ToGbk(text.c_str());
+    if (converted == nullptr) {
+        return {};
+    }
+    return std::string(converted);
 }
 
 } // namespace Encoding

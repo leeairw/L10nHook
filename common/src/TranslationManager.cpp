@@ -547,8 +547,8 @@ char* TranslationManager::Translate(
         return nullptr;
     }
 
-    std::wstring source;
-    if (!Encoding::MultiByteToUtf16(inputCodePage, sourceText, source)) {
+    const wchar_t* source = Encoding::MultiByteToUtf16(inputCodePage, sourceText);
+    if (source == nullptr) {
         return nullptr;
     }
 
@@ -558,12 +558,13 @@ char* TranslationManager::Translate(
     }
 
     std::wstring translatedText(translated.data(), translated.size());
-    std::string& buffer = NextMultibyteTranslationBuffer();
-    if (!Encoding::Utf16ToMultiByte(outputCodePage, translatedText.c_str(), buffer)) {
-        buffer.clear();
+    const char* converted = Encoding::Utf16ToMultiByte(outputCodePage, translatedText.c_str());
+    if (converted == nullptr) {
         return nullptr;
     }
 
+    std::string& buffer = NextMultibyteTranslationBuffer();
+    buffer = converted;
     return buffer.data();
 }
 

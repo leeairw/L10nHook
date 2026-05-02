@@ -1,6 +1,7 @@
 #include "DetoursHook.h"
 
 #include "AddressResolver.h"
+#include "Encoding.h"
 #include "Logger.h"
 
 #include <Windows.h>
@@ -94,9 +95,9 @@ bool DetoursHook::Register(const std::wstring& moduleName, const std::string& fu
 
     void* target = AddressResolver::GetFunctionAddress(moduleName.c_str(), functionName.c_str());
     if (target == nullptr) {
-        Logger::Write(L"[DetoursHook] 解析目标函数失败。module=%s function=%S",
+        Logger::Write(L"[DetoursHook] 解析目标函数失败。module=%s function=%s",
                       moduleName.c_str(),
-                      functionName.c_str());
+                      U82W(functionName.c_str()));
         return false;
     }
 

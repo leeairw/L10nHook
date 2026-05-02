@@ -6,6 +6,7 @@
 
 #include <cstdarg>
 #include <cstdio>
+#include <string>
 #include <vector>
 
 namespace {
@@ -105,9 +106,9 @@ void Write(const char* utf8Format, ...) {
     va_end(args);
 
     if (formatted) {
-        std::wstring wide;
-        if (Encoding::Utf8ToUtf16(message, wide)) {
-            WriteLine(wide.c_str());
+        const wchar_t* wide = U82W(message.c_str());
+        if (wide != nullptr) {
+            WriteLine(wide);
             return;
         }
 

@@ -25,8 +25,8 @@ std::wstring FunctionNameToWide(const char* functionName) {
         return L"<null>";
     }
 
-    std::wstring converted;
-    if (Encoding::GbkToUtf16(functionName, converted)) {
+    const wchar_t* converted = GBK2W(functionName);
+    if (converted != nullptr) {
         return converted;
     }
 

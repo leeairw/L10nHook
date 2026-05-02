@@ -113,12 +113,11 @@ void LogResolveSuccess(const char* targetName,
                        std::uintptr_t address,
                        std::string_view detail) {
     HMODULE module = GetModuleHandleW(moduleName.c_str());
-    std::string moduleUtf8;
-    Encoding::Utf16ToUtf8(moduleName, moduleUtf8);
+    const char* moduleUtf8 = W2U8(moduleName.c_str());
     Logger::Write(u8"[QStringBridge] 解析成功 | 目标=%s | 方式=%s | 模块偏移=%s+0x%zX | 地址=%p | 命中=%s",
                   targetName,
                   method,
-                  moduleUtf8.c_str(),
+                  moduleUtf8 != nullptr ? moduleUtf8 : "<invalid>",
                   ComputeModuleOffset(module, address),
                   reinterpret_cast<void*>(address),
                   detail.empty() ? "-" : detail.data());
@@ -127,11 +126,10 @@ void LogResolveSuccess(const char* targetName,
 void LogResolveFailure(const char* targetName,
                        const std::wstring& moduleName,
                        std::size_t candidateCount) {
-    std::string moduleUtf8;
-    Encoding::Utf16ToUtf8(moduleName, moduleUtf8);
+    const char* moduleUtf8 = W2U8(moduleName.c_str());
     Logger::Write(u8"[QStringBridge] 解析失败 | 目标=%s | 模块=%s | 尝试候选数=%zu",
                   targetName,
-                  moduleUtf8.c_str(),
+                  moduleUtf8 != nullptr ? moduleUtf8 : "<invalid>",
                   candidateCount);
 }
 
@@ -306,10 +304,9 @@ bool QStringBridge::Initialize(const Config& config) {
     size_ = ResolveCandidateInOrder<QStringSize>("QString::size", config_.module_name, kQStringSizeCandidates);
 
     initialized_ = true;
-    std::string moduleUtf8;
-    Encoding::Utf16ToUtf8(config_.module_name, moduleUtf8);
+    const char* moduleUtf8 = W2U8(config_.module_name.c_str());
     Logger::Write(u8"[QStringBridge] 初始化结果 | 模块=%s | 对象大小=%zu | 构造=%d | 析构=%d | utf16=%d | size=%d | 可创建=%d",
-                  moduleUtf8.c_str(),
+                  moduleUtf8 != nullptr ? moduleUtf8 : "<invalid>",
                   config_.object_size,
                   constructor_ != nullptr ? 1 : 0,
                   destructor_ != nullptr ? 1 : 0,
